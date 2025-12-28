@@ -1,0 +1,1339 @@
+# Comprehensive Bacterial and Viral Genome Analysis Pipeline
+
+## Executive Summary
+
+This document outlines the design and preparation for a modular bioinformatics pipeline for deep characterization of bacterial and viral genomes. The pipeline will:
+
+- Accept Illumina short reads, Oxford Nanopore long reads, or hybrid input
+- Handle pure cultures and mixed samples
+- Support bacteria and all viruses (DNA, RNA, bacteriophages)
+- Run in fully offline (air-gapped) environments
+- Generate comprehensive HTML reports with interactive visualizations
+- Be highly modular and extensible using Snakemake
+
+---
+
+## Table of Contents
+
+1. [Pipeline Architecture](#1-pipeline-architecture)
+2. [Module Specifications](#2-module-specifications)
+3. [Database Requirements](#3-database-requirements)
+4. [Software Dependencies](#4-software-dependencies)
+5. [Output Specifications](#5-output-specifications)
+6. [Preparation Checklist](#6-preparation-checklist)
+7. [Test Data Requirements](#7-test-data-requirements)
+8. [Development Timeline](#8-development-timeline)
+9. [Open Questions](#9-open-questions)
+
+---
+
+## 1. Pipeline Architecture
+
+### 1.1 Design Philosophy
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         GENOME ANALYSIS PIPELINE                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  EXECUTION MODES:                                                           │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                      │
+│  │  STANDALONE  │  │   UNIFIED    │  │    AUTO      │                      │
+│  │   MODULES    │  │   PIPELINE   │  │    MODE      │                      │
+│  │              │  │              │  │              │                      │
+│  │ Run any      │  │ Run all or   │  │ Intelligent  │                      │
+│  │ module       │  │ selected     │  │ routing      │                      │
+│  │ independently│  │ modules in   │  │ based on     │                      │
+│  │              │  │ sequence     │  │ input data   │                      │
+│  └──────────────┘  └──────────────┘  └──────────────┘                      │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### 1.2 Core Architecture
+
+```
+INPUT                    CORE PROCESSING                         OUTPUT
+─────                    ───────────────                         ──────
+
+┌─────────┐     ┌────────────────────────────────────┐     ┌─────────────┐
+│ FASTQ   │────▶│  MODULE 1: Quality Control         │────▶│ QC Report   │
+│ (Short) │     │  - FastQC/MultiQC                  │     │             │
+│         │     │  - Trimming/Filtering              │     │             │
+└─────────┘     │  - Contamination screening         │     └─────────────┘
+                └────────────────────────────────────┘
+┌─────────┐                      │
+│ FASTQ   │                      ▼
+│ (Long)  │     ┌────────────────────────────────────┐     ┌─────────────┐
+│         │────▶│  MODULE 2: Assembly                │────▶│ Contigs     │
+└─────────┘     │  - Short-read assembly             │     │ FASTA       │
+                │  - Long-read assembly              │     │             │
+┌─────────┐     │  - Hybrid assembly                 │     └─────────────┘
+│ BOTH    │────▶│  - Metagenome binning (if mixed)   │
+└─────────┘     └────────────────────────────────────┘
+                                 │
+                                 ▼
+                ┌────────────────────────────────────┐     ┌─────────────┐
+                │  MODULE 3: Identification          │────▶│ Taxonomy    │
+                │  - Taxonomic classification        │     │ Report      │
+                │  - Closest reference matching      │     │             │
+                │  - Contamination detection         │     └─────────────┘
+                └────────────────────────────────────┘
+                                 │
+                                 ▼
+                ┌────────────────────────────────────┐     ┌─────────────┐
+                │  MODULE 4: Annotation              │────▶│ GFF/GBK     │
+                │  - Gene prediction                 │     │ Annotations │
+                │  - Functional annotation           │     │             │
+                │  - Specialized databases           │     └─────────────┘
+                └────────────────────────────────────┘
+                                 │
+                                 ▼
+                ┌────────────────────────────────────────────────────────┐
+                │  MODULE 5: Specialized Analysis (Parallel Branches)    │
+                │                                                        │
+                │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+                │  │   AMR    │ │Virulence │ │  Typing  │ │ Plasmids │  │
+                │  │ Analysis │ │ Factors  │ │MLST/cgMLST│ │ & MGEs   │  │
+                │  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
+                │                                                        │
+                │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+                │  │ Prophage │ │ CRISPR   │ │ Genomic  │ │ Secretion│  │
+                │  │Detection │ │ Arrays   │ │ Islands  │ │ Systems  │  │
+                │  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
+                └────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+                ┌────────────────────────────────────┐     ┌─────────────┐
+                │  MODULE 6: Anomaly Detection       │────▶│ Anomaly     │
+                │  - Foreign element identification  │     │ Report      │
+                │  - Mosaic genome detection         │     │             │
+                │  - Horizontal gene transfer        │     └─────────────┘
+                │  - Synthetic biology signatures    │
+                └────────────────────────────────────┘
+                                 │
+                                 ▼
+                ┌────────────────────────────────────┐     ┌─────────────┐
+                │  MODULE 7: Phylogenetic Analysis   │────▶│ Phylogeny   │
+                │  - Whole genome alignment          │     │ Trees       │
+                │  - Core genome phylogeny           │     │             │
+                │  - Gene-specific phylogenies       │     └─────────────┘
+                └────────────────────────────────────┘
+                                 │
+                                 ▼
+                ┌────────────────────────────────────┐     ┌─────────────┐
+                │  MODULE 8: Report Generation       │────▶│ HTML Report │
+                │  - Aggregate all results           │     │ with        │
+                │  - Generate visualizations         │     │ Interactive │
+                │  - Create clinical summary         │     │ Visuals     │
+                │  - Export annotations              │     └─────────────┘
+                └────────────────────────────────────┘
+```
+
+### 1.3 Snakemake Structure
+
+```
+genome_pipeline/
+│
+├── Snakefile                    # Main entry point
+├── config/
+│   ├── config.yaml              # Main configuration
+│   ├── databases.yaml           # Database paths
+│   └── profiles/                # Execution profiles
+│       ├── local.yaml
+│       ├── cluster.yaml
+│       └── docker.yaml
+│
+├── workflow/
+│   ├── rules/
+│   │   ├── common.smk           # Shared rules and functions
+│   │   ├── qc.smk               # Module 1: Quality Control
+│   │   ├── assembly.smk         # Module 2: Assembly
+│   │   ├── identification.smk   # Module 3: Identification
+│   │   ├── annotation.smk       # Module 4: Annotation
+│   │   ├── amr.smk              # Module 5a: AMR Analysis
+│   │   ├── virulence.smk        # Module 5b: Virulence Factors
+│   │   ├── typing.smk           # Module 5c: MLST/Typing
+│   │   ├── mobile_elements.smk  # Module 5d: Plasmids/MGEs
+│   │   ├── prophages.smk        # Module 5e: Prophage Detection
+│   │   ├── crispr.smk           # Module 5f: CRISPR Analysis
+│   │   ├── islands.smk          # Module 5g: Genomic Islands
+│   │   ├── secretion.smk        # Module 5h: Secretion Systems
+│   │   ├── anomaly.smk          # Module 6: Anomaly Detection
+│   │   ├── phylogeny.smk        # Module 7: Phylogenetics
+│   │   └── report.smk           # Module 8: Report Generation
+│   │
+│   ├── scripts/
+│   │   ├── python/              # Python analysis scripts
+│   │   ├── R/                   # R visualization scripts
+│   │   └── shell/               # Shell helper scripts
+│   │
+│   └── envs/
+│       ├── qc.yaml              # Conda env for QC tools
+│       ├── assembly.yaml        # Conda env for assemblers
+│       ├── annotation.yaml      # Conda env for annotation
+│       └── ...                  # Other environment files
+│
+├── resources/
+│   ├── schemas/                 # JSON schemas for validation
+│   ├── templates/               # Report templates (Jinja2)
+│   └── assets/                  # CSS, JS for reports
+│
+├── docker/
+│   ├── Dockerfile               # Main pipeline container
+│   └── docker-compose.yml       # Multi-container setup
+│
+└── tests/
+    ├── unit/                    # Unit tests for scripts
+    ├── integration/             # Integration tests
+    └── data/                    # Test datasets
+```
+
+---
+
+## 2. Module Specifications
+
+### 2.1 Module 1: Quality Control
+
+**Purpose**: Assess and improve read quality, detect contamination
+
+**Tools**:
+| Tool | Purpose | Input | Output |
+|------|---------|-------|--------|
+| FastQC | Quality assessment | FASTQ | HTML reports |
+| MultiQC | Aggregate QC reports | Multiple QC outputs | Summary HTML |
+| fastp | Trimming/filtering (Illumina) | FASTQ | Trimmed FASTQ |
+| Porechop | Adapter trimming (Nanopore) | FASTQ | Trimmed FASTQ |
+| NanoFilt/Filtlong | Quality filtering (Nanopore) | FASTQ | Filtered FASTQ |
+| Kraken2 | Contamination screening | FASTQ | Classification |
+| KrakenTools | Kraken result manipulation | Kraken output | Filtered reads |
+
+**Outputs**:
+- QC statistics (JSON)
+- Trimmed/filtered reads (FASTQ)
+- Contamination report
+- Species composition estimate (for mixed samples)
+
+### 2.2 Module 2: Assembly
+
+**Purpose**: Reconstruct genome(s) from reads
+
+**Tools**:
+| Tool | Purpose | Input | Output |
+|------|---------|-------|--------|
+| SPAdes | Short-read assembly | Illumina FASTQ | Contigs FASTA |
+| metaSPAdes | Metagenomic assembly | Illumina FASTQ | Contigs FASTA |
+| Flye | Long-read assembly | Nanopore FASTQ | Contigs FASTA |
+| metaFlye | Long-read metagenome | Nanopore FASTQ | Contigs FASTA |
+| Unicycler | Hybrid assembly | Both FASTQ types | Contigs FASTA |
+| Raven | Fast long-read assembly | Nanopore FASTQ | Contigs FASTA |
+| Medaka | Nanopore polishing | Assembly + reads | Polished FASTA |
+| Pilon | Illumina polishing | Assembly + reads | Polished FASTA |
+| QUAST | Assembly QC | Assembly FASTA | QC report |
+| CheckM2 | Completeness/contamination | Assembly FASTA | Quality metrics |
+| MetaBAT2/MaxBin2 | Metagenome binning | Assembly + reads | Binned genomes |
+
+**Decision Logic**:
+```
+IF only_short_reads AND pure_culture:
+    → SPAdes (careful mode)
+ELIF only_short_reads AND mixed_sample:
+    → metaSPAdes → MetaBAT2/MaxBin2 binning
+ELIF only_long_reads AND pure_culture:
+    → Flye → Medaka polishing
+ELIF only_long_reads AND mixed_sample:
+    → metaFlye → Medaka → binning
+ELIF hybrid AND pure_culture:
+    → Unicycler (or Flye → Pilon)
+ELIF hybrid AND mixed_sample:
+    → metaFlye → Pilon → binning
+```
+
+**Outputs**:
+- Assembled contigs/scaffolds (FASTA)
+- Assembly statistics (N50, L50, coverage, etc.)
+- Per-contig coverage information
+- Binned genomes (if metagenomic)
+
+### 2.3 Module 3: Identification
+
+**Purpose**: Taxonomic identification and closest reference detection
+
+**Tools**:
+| Tool | Purpose | Input | Output |
+|------|---------|-------|--------|
+| Kraken2 | Taxonomic classification | FASTA/FASTQ | Tax report |
+| Centrifuge | Taxonomic classification | FASTA/FASTQ | Tax report |
+| GTDB-Tk | Bacterial taxonomy (GTDB) | Assembly | Classification |
+| sourmash | MinHash-based comparison | Assembly | Matches |
+| Mash | Fast distance estimation | Assembly | Distances |
+| ANI (fastANI/pyani) | Average nucleotide identity | Assembly | ANI values |
+| BLAST (blastn) | Sequence similarity | Assembly | Alignments |
+| geNomad | Virus/plasmid identification | Assembly | Classification |
+| CheckV | Viral genome quality | Assembly | Quality report |
+
+**Outputs**:
+- Taxonomic classification with confidence
+- Closest reference genome(s) with ANI
+- Organism type (bacteria, virus, phage, plasmid)
+- Genome completeness estimate
+
+### 2.4 Module 4: Annotation
+
+**Purpose**: Predict and annotate genomic features
+
+**Tools**:
+| Tool | Purpose | Input | Output |
+|------|---------|-------|--------|
+| Prokka | Bacterial annotation | Assembly | GFF, GBK |
+| Bakta | Modern bacterial annotation | Assembly | GFF, GBK, JSON |
+| PGAP (offline) | NCBI-style annotation | Assembly | GFF, GBK |
+| Prodigal | Gene prediction | Assembly | GFF |
+| ARAGORN | tRNA/tmRNA prediction | Assembly | GFF |
+| Barrnap | rRNA prediction | Assembly | GFF |
+| Pharokka | Phage annotation | Assembly | GFF, GBK |
+| VADR | Viral annotation | Assembly | GFF |
+| InterProScan | Protein domains | Proteins | TSV |
+| eggNOG-mapper | Functional annotation | Proteins | TSV |
+| KEGG/BlastKOALA | Pathway annotation | Proteins | TSV |
+
+**Virus-Specific Annotation**:
+| Tool | Purpose |
+|------|---------|
+| VADR | Reference-based viral annotation |
+| Pharokka | Phage-specific annotation |
+| VirSorter2 | Viral identification from metagenomes |
+| VIBRANT | Viral annotation and characterization |
+| DRAM-v | Viral metabolic annotation |
+
+**Outputs**:
+- Gene predictions (GFF3, GenBank)
+- Protein sequences (FASTA)
+- Functional annotations
+- Pathway assignments
+- Domain predictions
+
+### 2.5 Module 5: Specialized Analysis
+
+#### 5a. Antimicrobial Resistance (AMR)
+
+**Tools**:
+| Tool | Purpose | Database |
+|------|---------|----------|
+| AMRFinderPlus | AMR gene detection | NCBI AMR |
+| ResFinder | Resistance genes | ResFinder DB |
+| CARD/RGI | Comprehensive resistance | CARD |
+| PointFinder | Point mutations | PointFinder DB |
+| staramr | Combined AMR analysis | Multiple |
+
+**Outputs**:
+- AMR genes detected
+- Point mutations conferring resistance
+- Predicted phenotypic resistance
+- Drug/gene associations
+
+#### 5b. Virulence Factors
+
+**Tools**:
+| Tool | Purpose | Database |
+|------|---------|----------|
+| VFDB BLAST | Virulence genes | VFDB |
+| VirulenceFinder | Virulence detection | VirulenceFinder DB |
+| Victors | Virulence prediction | Victors DB |
+| ABRicate | Multi-database screening | Multiple |
+
+**Outputs**:
+- Virulence genes identified
+- Virulence factor categories
+- Pathogenicity potential assessment
+
+#### 5c. Typing (MLST/cgMLST/Serotyping)
+
+**Tools**:
+| Tool | Purpose |
+|------|---------|
+| mlst | 7-gene MLST |
+| chewBBACA | cgMLST/wgMLST |
+| SeqSero2 | Salmonella serotyping |
+| SerotypeFinder | E. coli serotyping |
+| Kleborate | Klebsiella typing |
+| PneumoKITy | Pneumococcal serotyping |
+| LisSero | Listeria serotyping |
+| SpaTyper | S. aureus spa typing |
+| SCCmec | S. aureus SCCmec typing |
+| hicap | H. influenzae cap typing |
+
+**Outputs**:
+- MLST sequence type
+- cgMLST profile (if available)
+- Serotype predictions
+- Strain-specific markers
+
+#### 5d. Mobile Genetic Elements (MGEs)
+
+**Tools**:
+| Tool | Purpose |
+|------|---------|
+| PlasmidFinder | Plasmid replicon detection |
+| MOB-suite | Plasmid typing and reconstruction |
+| geNomad | Plasmid/virus identification |
+| PlasFlow | Plasmid prediction (ML-based) |
+| gplas | Plasmid binning from graphs |
+| ISfinder BLAST | Insertion sequences |
+| ICEfinder | Integrative conjugative elements |
+| IntegronFinder | Integron detection |
+
+**Outputs**:
+- Plasmid contigs identified
+- Replicon types
+- Mobility predictions
+- IS elements and positions
+- Integrons with gene cassettes
+
+#### 5e. Prophage Detection
+
+**Tools**:
+| Tool | Purpose |
+|------|---------|
+| PHASTER | Prophage identification |
+| PhiSpy | Prophage prediction |
+| Phigaro | Prophage detection |
+| VirSorter2 | Integrated virus detection |
+| VIBRANT | Prophage characterization |
+| PropagAtE | Prophage activity prediction |
+
+**Outputs**:
+- Prophage regions (coordinates)
+- Prophage completeness
+- Closest phage matches
+- Integration sites
+
+#### 5f. CRISPR-Cas Systems
+
+**Tools**:
+| Tool | Purpose |
+|------|---------|
+| CRISPRCasFinder | CRISPR array + Cas detection |
+| MinCED | CRISPR detection |
+| CRISPRDetect | CRISPR array analysis |
+| CRISPRTarget | Spacer target prediction |
+
+**Outputs**:
+- CRISPR arrays (position, repeats, spacers)
+- Cas genes and system type
+- Spacer sequences for target analysis
+
+#### 5g. Genomic Islands
+
+**Tools**:
+| Tool | Purpose |
+|------|---------|
+| IslandViewer/IslandPath | Genomic island prediction |
+| Alien_hunter | HGT region detection |
+| SIGI-HMM | Island prediction |
+| GIPSy | Island prediction |
+| PAI-DB | Pathogenicity islands |
+
+**Outputs**:
+- Predicted genomic islands
+- Island gene content
+- Potential origin predictions
+
+#### 5h. Secretion Systems
+
+**Tools**:
+| Tool | Purpose |
+|------|---------|
+| MacSyFinder | Secretion system detection |
+| TXSScan | Type secretion systems |
+| T346Hunter | Type III/IV/VI detection |
+| EffectiveDB | Effector prediction |
+
+**Outputs**:
+- Secretion system types present
+- Component genes
+- Predicted effectors
+
+### 2.6 Module 6: Anomaly Detection
+
+**Purpose**: Detect foreign elements, mosaicism, and signs of genetic manipulation
+
+**Analysis Categories**:
+
+#### 6a. Compositional Anomaly Detection
+```
+- GC content analysis (sliding window)
+- Codon usage bias analysis
+- k-mer frequency analysis
+- Dinucleotide relative abundance
+- Compare to species-typical values
+```
+
+**Tools**: Custom Python scripts using BioPython, scikit-learn
+
+#### 6b. Phylogenetic Incongruence Detection
+```
+- Gene tree vs species tree comparison
+- Detection of recent horizontal transfers
+- Identification of mosaic gene structures
+```
+
+**Tools**: Custom pipeline using RAxML-NG, IQ-TREE, TreeShrink
+
+#### 6c. Synthetic Biology Signature Detection
+```
+- Known synthetic promoter/terminator sequences
+- Restriction site patterns
+- Codon optimization signatures
+- Standard biological parts (iGEM registry)
+- Antibiotic markers common in cloning
+- Origin of replication sequences
+```
+
+**Tools**: Custom BLAST/HMM searches against curated databases
+
+#### 6d. Integration Site Analysis
+```
+- Identification of integration site motifs
+- Detection of target site duplications
+- Analysis of flanking sequences
+- Comparison to known integration preferences
+```
+
+**Outputs**:
+- Anomalous regions with coordinates
+- Compositional deviation plots
+- Potential foreign elements flagged
+- Confidence scores for each anomaly
+- Visualization of genomic context
+
+### 2.7 Module 7: Phylogenetic Analysis
+
+**Purpose**: Place genome in evolutionary context
+
+**Tools**:
+| Tool | Purpose |
+|------|---------|
+| Mauve/progressiveMauve | Whole genome alignment |
+| MUMmer/nucmer | Fast genome alignment |
+| Parsnp | Core genome alignment |
+| Roary/Panaroo | Pan-genome analysis |
+| OrthoFinder | Ortholog detection |
+| MAFFT/MUSCLE | Multiple sequence alignment |
+| IQ-TREE | Maximum likelihood phylogeny |
+| RAxML-NG | ML phylogeny (large datasets) |
+| FastTree | Quick approximate phylogeny |
+| ggtree/iTOL | Tree visualization |
+
+**Analysis Types**:
+1. **Whole-genome phylogeny**: Using core genome SNPs
+2. **Single-gene phylogeny**: For specific genes of interest
+3. **MLST-based placement**: Using existing MLST trees
+4. **Pan-genome analysis**: For understanding gene repertoire
+
+**Outputs**:
+- Phylogenetic trees (Newick, PDF, interactive HTML)
+- Closest relatives identified
+- Evolutionary distance metrics
+- Bootstrap/support values
+
+### 2.8 Module 8: Report Generation
+
+**Purpose**: Generate comprehensive HTML report with visualizations
+
+**Report Sections**:
+
+```
+1. EXECUTIVE SUMMARY
+   ├── Organism identification (with confidence)
+   ├── Key findings highlights
+   ├── Clinical relevance summary
+   └── Flags/warnings
+
+2. SAMPLE & QC INFORMATION
+   ├── Input data summary
+   ├── Quality metrics
+   ├── Read statistics
+   └── Contamination assessment
+
+3. ASSEMBLY RESULTS
+   ├── Assembly statistics
+   ├── Completeness assessment
+   ├── Genome overview figure
+   └── Contig information
+
+4. TAXONOMIC IDENTIFICATION
+   ├── Classification results
+   ├── Closest references (with ANI)
+   ├── Taxonomy visualization
+   └── Confidence assessment
+
+5. GENOME ANNOTATION
+   ├── Gene statistics
+   ├── Functional categories
+   ├── Interactive genome map
+   └── Feature tables
+
+6. CLINICAL RELEVANCE
+   ├── Antimicrobial resistance
+   │   ├── Resistance genes
+   │   ├── Point mutations
+   │   └── Predicted phenotype
+   ├── Virulence factors
+   ├── Typing results
+   └── Pathogenicity assessment
+
+7. MOBILE GENETIC ELEMENTS
+   ├── Plasmid analysis
+   ├── Prophage regions
+   ├── Insertion sequences
+   └── Integrons
+
+8. GENOME ARCHITECTURE ANALYSIS
+   ├── Genomic islands
+   ├── CRISPR-Cas systems
+   ├── Secretion systems
+   └── Special features
+
+9. ANOMALY ANALYSIS
+   ├── Compositional anomalies
+   ├── Foreign element detection
+   ├── Potential editing signatures
+   └── Mosaic region analysis
+
+10. PHYLOGENETIC CONTEXT
+    ├── Closest relatives
+    ├── Phylogenetic tree
+    └── Evolutionary insights
+
+11. TECHNICAL DETAILS
+    ├── Pipeline version
+    ├── Tools and versions used
+    ├── Database versions
+    └── Full parameter log
+```
+
+**Visualization Tools**:
+| Tool | Purpose |
+|------|---------|
+| Plotly | Interactive plots (Python) |
+| Bokeh | Interactive visualizations |
+| D3.js | Custom interactive figures |
+| Circos | Circular genome plots |
+| pyCirclize | Python circular plots |
+| CGView | Circular genome viewer |
+| Artemis | Genome browser |
+| JBrowse2 | Interactive genome browser |
+| gggenes | Gene arrow diagrams |
+| clinker | Gene cluster comparison |
+| Proksee | Genome visualization server |
+
+**Visualization Types**:
+1. **Circular genome map** (static + interactive)
+2. **Linear genome browser** (JBrowse2 embedded)
+3. **GC content/skew plots**
+4. **Coverage depth plots**
+5. **Comparative genome plots** (vs. reference)
+6. **Gene function pie/bar charts**
+7. **AMR/virulence heatmaps**
+8. **Phylogenetic tree** (interactive)
+9. **Synteny plots** (if comparing to reference)
+10. **Anomaly region highlights**
+
+---
+
+## 3. Database Requirements
+
+### 3.1 Essential Databases
+
+| Database | Purpose | Approx. Size | Update Frequency |
+|----------|---------|--------------|------------------|
+| **Kraken2 Standard** | Taxonomic classification | ~50-100 GB | Quarterly |
+| **GTDB-Tk** | Bacterial taxonomy | ~85 GB | With GTDB releases |
+| **Bakta** | Bacterial annotation | ~30 GB | Quarterly |
+| **NCBI nr (subset)** | Protein similarity | Variable | As needed |
+| **NCBI nt (subset)** | Nucleotide similarity | Variable | As needed |
+| **RefSeq Complete** | Reference genomes | ~200+ GB | Monthly |
+| **UniProtKB/Swiss-Prot** | Curated proteins | ~1 GB | Monthly |
+| **UniRef90** | Clustered proteins | ~50 GB | Monthly |
+| **Pfam** | Protein domains | ~1 GB | Yearly |
+| **InterPro** | Domain integration | ~50 GB | Quarterly |
+
+### 3.2 Specialized Databases
+
+| Database | Purpose | Approx. Size |
+|----------|---------|--------------|
+| **CARD** | AMR genes | ~500 MB |
+| **ResFinder** | Resistance genes | ~50 MB |
+| **NCBI AMRFinder** | AMR detection | ~500 MB |
+| **VFDB** | Virulence factors | ~100 MB |
+| **PlasmidFinder** | Plasmid replicons | ~10 MB |
+| **PubMLST** | MLST schemes | ~1 GB |
+| **ISfinder** | Insertion sequences | ~50 MB |
+| **ICEberg** | ICE database | ~20 MB |
+| **PHASTER** | Prophage database | ~5 GB |
+| **pVOGs/PHROGs** | Phage orthologous groups | ~1 GB |
+| **CheckV** | Viral genome DB | ~2 GB |
+| **ICTV VMR** | Viral taxonomy | ~100 MB |
+| **CRISPRCasdb** | CRISPR-Cas DB | ~500 MB |
+| **IMG/VR** | Viral sequences | ~50 GB |
+
+### 3.3 Phylogenetic Reference Sets
+
+| Resource | Purpose | Approx. Size |
+|----------|---------|--------------|
+| **Type strain genomes** | Reference phylogeny | ~20 GB |
+| **GTDB representative genomes** | Bacterial tree | ~50 GB |
+| **ICTV exemplar viruses** | Viral tree | ~5 GB |
+| **Species-specific references** | Targeted analysis | Variable |
+
+### 3.4 Database Download Commands
+
+```bash
+# Create database directory structure
+mkdir -p /databases/{kraken2,gtdbtk,bakta,card,vfdb,resfinder,pubmlst}
+mkdir -p /databases/{plasmids,prophage,checkv,interpro,ncbi}
+
+# Kraken2 Standard Database
+kraken2-build --standard --threads 16 --db /databases/kraken2/standard
+
+# GTDB-Tk Database
+wget https://data.gtdb.ecogenomic.org/releases/latest/auxillary_files/gtdbtk_data.tar.gz
+tar -xzf gtdbtk_data.tar.gz -C /databases/gtdbtk/
+
+# Bakta Database
+bakta_db download --output /databases/bakta --type full
+
+# CARD Database
+wget https://card.mcmaster.ca/latest/data
+tar -xjf data -C /databases/card/
+
+# AMRFinderPlus Database
+amrfinder_update -d /databases/amrfinder
+
+# VFDB
+wget http://www.mgc.ac.cn/VFs/Down/VFDB_setA_pro.fas.gz -O /databases/vfdb/
+wget http://www.mgc.ac.cn/VFs/Down/VFDB_setB_pro.fas.gz -O /databases/vfdb/
+
+# CheckV Database
+checkv download_database /databases/checkv
+
+# PubMLST schemes
+# (Use mlst --update or manual download from pubmlst.org)
+mlst --update
+
+# InterProScan Data
+# (Large - download from InterPro FTP)
+
+# Specific additional databases listed in preparation section
+```
+
+---
+
+## 4. Software Dependencies
+
+### 4.1 Core Dependencies (Docker Base Image)
+
+```dockerfile
+# Base: Ubuntu 22.04 or similar
+# Python 3.10+
+# Conda/Mamba for environment management
+# Core bioinformatics tools
+```
+
+### 4.2 Complete Tool List by Module
+
+```yaml
+# conda environment specifications
+
+qc_tools:
+  - fastqc=0.12.1
+  - multiqc=1.21
+  - fastp=0.23.4
+  - porechop=0.2.4
+  - nanofilt=2.8.0
+  - filtlong=0.2.1
+  - kraken2=2.1.3
+  - krakentools=1.2
+  
+assembly_tools:
+  - spades=3.15.5
+  - flye=2.9.3
+  - unicycler=0.5.0
+  - raven-assembler=1.8.1
+  - medaka=1.11.3
+  - pilon=1.24
+  - quast=5.2.0
+  - checkm2=1.0.1
+  - metabat2=2.15
+  - maxbin2=2.2.7
+  - samtools=1.19
+  - minimap2=2.26
+  - bwa=0.7.17
+  
+identification_tools:
+  - kraken2=2.1.3
+  - centrifuge=1.0.4
+  - gtdbtk=2.3.2
+  - sourmash=4.8.4
+  - mash=2.3
+  - fastani=1.34
+  - blast=2.15.0
+  - genomad=1.7.0
+  - checkv=1.0.1
+  
+annotation_tools:
+  - prokka=1.14.6
+  - bakta=1.9.2
+  - prodigal=2.6.3
+  - aragorn=1.2.41
+  - barrnap=0.9
+  - pharokka=1.5.1
+  - interproscan=5.66-98.0  # large
+  - eggnog-mapper=2.1.12
+  
+amr_tools:
+  - amrfinderplus=3.11.26
+  - abricate=1.0.1
+  - rgi=6.0.3
+  - staramr=0.10.0
+  
+typing_tools:
+  - mlst=2.23.0
+  - chewbbaca=3.3.1
+  - seqsero2=1.3.1
+  - kleborate=2.3.2
+  - sistr=1.1.1
+  
+mge_tools:
+  - mob_suite=3.1.7
+  - plasflow=1.1.0
+  - isescan=1.7.2
+  - integronfinder=2.0.2
+  
+prophage_tools:
+  - phispy=4.2.21
+  - phigaro=2.3.0
+  - virsorter=2.2.4
+  - vibrant=1.2.1
+  
+crispr_tools:
+  - minced=0.4.2
+  
+phylogeny_tools:
+  - mauve=2.4.0
+  - mummer=4.0.0
+  - parsnp=1.7.4
+  - roary=3.13.0
+  - panaroo=1.3.4
+  - mafft=7.520
+  - muscle=5.1
+  - iqtree=2.2.5
+  - raxml-ng=1.2.0
+  - fasttree=2.1.11
+  
+visualization_tools:
+  - circos=0.69-9
+  - clinker=0.0.28
+  - pygenomeviz  # pip
+  - dna_features_viewer  # pip
+  
+python_packages:
+  - biopython=1.83
+  - pandas=2.2.0
+  - numpy=1.26.4
+  - scipy=1.12.0
+  - scikit-learn=1.4.0
+  - plotly=5.18.0
+  - bokeh=3.3.4
+  - jinja2=3.1.3
+  - pyyaml=6.0.1
+  - snakemake=8.4.8
+  - pytest=8.0.0
+```
+
+### 4.3 Docker Strategy
+
+**Option A: Monolithic Container**
+- Single large container with all tools
+- Simpler deployment
+- Larger image size (~20-30 GB)
+
+**Option B: Modular Containers (Recommended)**
+- Separate containers per module
+- Snakemake handles container orchestration
+- Easier updates and maintenance
+- Uses `--use-singularity` or `--use-conda` flags
+
+```yaml
+# Example Snakemake rule with container
+rule run_prokka:
+    input:
+        assembly = "{sample}/assembly/contigs.fasta"
+    output:
+        gff = "{sample}/annotation/prokka/{sample}.gff"
+    container:
+        "docker://staphb/prokka:1.14.6"
+    shell:
+        "prokka --outdir {wildcards.sample}/annotation/prokka "
+        "--prefix {wildcards.sample} {input.assembly}"
+```
+
+---
+
+## 5. Output Specifications
+
+### 5.1 Directory Structure
+
+```
+output/{sample_id}/
+│
+├── 00_logs/
+│   ├── pipeline.log
+│   ├── snakemake.log
+│   └── tool_versions.txt
+│
+├── 01_qc/
+│   ├── fastqc/
+│   ├── multiqc/
+│   ├── trimmed_reads/
+│   └── contamination/
+│
+├── 02_assembly/
+│   ├── contigs.fasta
+│   ├── assembly_graph.gfa
+│   ├── assembly_stats.json
+│   └── quast/
+│
+├── 03_identification/
+│   ├── taxonomy.json
+│   ├── kraken2/
+│   ├── gtdbtk/
+│   ├── ani_results/
+│   └── closest_references.tsv
+│
+├── 04_annotation/
+│   ├── genome.gff
+│   ├── genome.gbk
+│   ├── proteins.faa
+│   ├── genes.fna
+│   ├── functional_annotation.tsv
+│   └── interproscan/
+│
+├── 05_specialized/
+│   ├── amr/
+│   │   ├── amrfinder_results.tsv
+│   │   ├── card_results.tsv
+│   │   └── resistance_summary.json
+│   ├── virulence/
+│   ├── typing/
+│   ├── plasmids/
+│   ├── prophages/
+│   ├── crispr/
+│   ├── islands/
+│   └── secretion/
+│
+├── 06_anomaly/
+│   ├── compositional_analysis/
+│   ├── foreign_elements/
+│   ├── hgt_analysis/
+│   └── anomaly_summary.json
+│
+├── 07_phylogeny/
+│   ├── core_genome_alignment/
+│   ├── trees/
+│   └── phylogeny_summary.json
+│
+├── 08_report/
+│   ├── genome_report.html
+│   ├── genome_report.pdf
+│   ├── visualizations/
+│   │   ├── circular_genome.svg
+│   │   ├── circular_genome_interactive.html
+│   │   ├── linear_genome.html
+│   │   ├── gc_content.svg
+│   │   ├── feature_plots/
+│   │   └── phylogeny_tree.html
+│   └── data/
+│       ├── summary.json
+│       └── all_results.json
+│
+└── 09_jbrowse/                    # Optional: Full genome browser
+    ├── config.json
+    └── tracks/
+```
+
+### 5.2 Report Format Specifications
+
+**HTML Report Requirements**:
+- Self-contained (all assets embedded or bundled)
+- Works offline (no CDN dependencies)
+- Responsive design
+- Print-friendly version
+- Exportable sections
+
+**JSON Output Schema** (for programmatic access):
+```json
+{
+  "sample_id": "string",
+  "analysis_date": "ISO8601",
+  "pipeline_version": "string",
+  "organism": {
+    "taxonomy": {},
+    "confidence": "float",
+    "closest_reference": {}
+  },
+  "genome": {
+    "size": "int",
+    "gc_content": "float",
+    "contigs": "int",
+    "n50": "int",
+    "completeness": "float"
+  },
+  "annotation": {
+    "cds_count": "int",
+    "rrna_count": "int",
+    "trna_count": "int"
+  },
+  "clinical": {
+    "amr_genes": [],
+    "virulence_factors": [],
+    "typing": {}
+  },
+  "anomalies": [],
+  "flags": []
+}
+```
+
+---
+
+## 6. Preparation Checklist
+
+### 6.1 PRIORITY 1: Download This Week (Essential)
+
+**Databases to Download** (~200-300 GB total):
+
+```bash
+# 1. Kraken2 Standard Database (for identification)
+# Size: ~50-100 GB
+kraken2-build --standard --threads 16 --db /path/to/kraken2_standard
+
+# 2. Bakta Database (for annotation - replaces Prokka's DBs)
+# Size: ~30 GB (full), ~2 GB (light)
+bakta_db download --output /path/to/bakta_db --type full
+
+# 3. GTDB-Tk Database (for bacterial taxonomy)
+# Size: ~85 GB
+wget https://data.gtdb.ecogenomic.org/releases/latest/auxillary_files/gtdbtk_v2_data.tar.gz
+tar -xzf gtdbtk_v2_data.tar.gz -C /path/to/gtdbtk_db
+
+# 4. CheckV Database (for viral genome QC)
+# Size: ~2 GB
+checkv download_database /path/to/checkv_db
+
+# 5. geNomad Database (for virus/plasmid identification)
+# Size: ~3 GB
+genomad download-database /path/to/genomad_db
+
+# 6. CARD Database (for AMR)
+# Size: ~500 MB
+wget https://card.mcmaster.ca/latest/data
+mkdir -p /path/to/card_db && tar -xjf data -C /path/to/card_db
+
+# 7. AMRFinderPlus Database
+# Size: ~500 MB
+amrfinder_update -d /path/to/amrfinder_db
+
+# 8. VFDB (Virulence Factor Database)
+# Size: ~100 MB
+mkdir -p /path/to/vfdb
+wget http://www.mgc.ac.cn/VFs/Down/VFDB_setA_pro.fas.gz -P /path/to/vfdb/
+wget http://www.mgc.ac.cn/VFs/Down/VFDB_setB_pro.fas.gz -P /path/to/vfdb/
+gunzip /path/to/vfdb/*.gz
+makeblastdb -in /path/to/vfdb/VFDB_setA_pro.fas -dbtype prot -out /path/to/vfdb/vfdb_core
+makeblastdb -in /path/to/vfdb/VFDB_setB_pro.fas -dbtype prot -out /path/to/vfdb/vfdb_full
+
+# 9. PubMLST schemes
+# Size: ~1 GB
+mlst --update  # or manual download
+
+# 10. Pharokka Database (for phage annotation)
+# Size: ~8 GB
+install_databases.py -o /path/to/pharokka_db
+```
+
+### 6.2 PRIORITY 2: Download If Time Permits
+
+```bash
+# 11. InterProScan Data (for domain annotation)
+# Size: ~50 GB - LARGE, but very useful
+# Download from: https://ftp.ebi.ac.uk/pub/databases/interpro/iprscan/
+
+# 12. eggNOG Database (for functional annotation)
+# Size: ~40 GB
+download_eggnog_data.py -y --data_dir /path/to/eggnog_db
+
+# 13. Centrifuge Database (alternative classifier)
+# Size: ~8-60 GB depending on version
+centrifuge-download -o /path/to/centrifuge_db -d "bacteria,viral,archaea" refseq > seqid2taxid.map
+
+# 14. PHROGs Database (for phage protein families)
+# Size: ~1 GB
+# Download from: https://phrogs.lmge.uca.fr/
+
+# 15. ICEberg Database (for ICEs)
+# Download from: https://bioinfo-mml.sjtu.edu.cn/ICEberg2/download.html
+```
+
+### 6.3 PRIORITY 3: Prepare Test Data
+
+**Test Cases to Prepare**:
+
+| Test Case | Description | Purpose |
+|-----------|-------------|---------|
+| **TC1_known_bacteria** | Well-characterized bacterial strain | Validate annotation |
+| **TC2_known_virus** | Well-characterized virus | Validate viral pipeline |
+| **TC3_amr_strain** | Strain with known AMR profile | Validate AMR detection |
+| **TC4_plasmid_carrier** | Strain with known plasmids | Validate MGE detection |
+| **TC5_mixed_sample** | Defined mixture of organisms | Validate metagenomics |
+| **TC6_novel_organism** | Less characterized genome | Test edge cases |
+| **TC7_prophage_rich** | Genome with known prophages | Validate prophage detection |
+| **TC8_illumina_only** | Short reads only | Validate short-read path |
+| **TC9_nanopore_only** | Long reads only | Validate long-read path |
+| **TC10_hybrid** | Both read types | Validate hybrid assembly |
+
+**For each test case, please provide**:
+1. Raw FASTQ files (subset OK, ~100k-1M reads)
+2. Known ground truth (species, AMR genes, etc.)
+3. Reference genome if available
+4. Expected annotation features
+
+### 6.4 Pre-build Validation Scripts
+
+```bash
+# Create validation script to run on current server
+# This will verify all databases are correctly installed
+
+#!/bin/bash
+# validate_databases.sh
+
+echo "Checking database installations..."
+
+# Check Kraken2
+kraken2 --db /path/to/kraken2_standard --version && \
+  echo "✓ Kraken2 database OK" || echo "✗ Kraken2 database MISSING"
+
+# Check Bakta
+bakta --db /path/to/bakta_db --version && \
+  echo "✓ Bakta database OK" || echo "✗ Bakta database MISSING"
+
+# Check GTDB-Tk
+export GTDBTK_DATA_PATH=/path/to/gtdbtk_db
+gtdbtk check_install && \
+  echo "✓ GTDB-Tk database OK" || echo "✗ GTDB-Tk database MISSING"
+
+# Add checks for all databases...
+```
+
+### 6.5 Docker Images to Pull
+
+```bash
+# Pull all required Docker images while you have internet
+docker pull staphb/spades:3.15.5
+docker pull staphb/flye:2.9.3
+docker pull staphb/unicycler:0.5.0
+docker pull staphb/prokka:1.14.6
+docker pull staphb/bakta:1.9.2
+docker pull staphb/quast:5.2.0
+docker pull staphb/kraken2:2.1.3
+docker pull staphb/mlst:2.23.0
+docker pull staphb/abricate:1.0.1
+docker pull ncbi/amrfinderplus:latest
+docker pull oschwengers/pharokka:latest
+docker pull nanoporetech/medaka:latest
+# ... and more
+
+# Save images for offline transfer
+docker save staphb/spades:3.15.5 | gzip > spades_3.15.5.tar.gz
+# Repeat for all images
+```
+
+---
+
+## 7. Test Data Requirements
+
+### 7.1 What I Need From You
+
+**For Pipeline Development**:
+
+1. **Representative Illumina dataset**
+   - Paired-end FASTQ files (R1, R2)
+   - ~1-5 million read pairs is sufficient
+   - Species identification (ground truth)
+
+2. **Representative Nanopore dataset**
+   - FASTQ file (already basecalled)
+   - ~100k-500k reads is sufficient
+   - Same or different organism OK
+
+3. **Hybrid test case** (if available)
+   - Both Illumina and Nanopore from same sample
+   - Most valuable for testing
+
+4. **Ground truth information**:
+   - Species/strain identification
+   - Known AMR genes (if any)
+   - Known plasmids (if any)
+   - Any special features you want validated
+
+### 7.2 Public Datasets We Can Use
+
+If you prefer, we can use public datasets for initial development:
+
+| Dataset | Source | Description |
+|---------|--------|-------------|
+| E. coli K-12 | SRA | Well-characterized reference |
+| NCTC 3000 strains | ENA | Diverse bacteria with known features |
+| ICTV exemplars | NCBI | Viral reference genomes |
+| FDA-ARGOS | NCBI | Regulatory-grade references |
+
+---
+
+## 8. Development Timeline
+
+### Phase 1: Core Infrastructure (Day 1-2)
+- [ ] Set up Snakemake project structure
+- [ ] Create configuration system
+- [ ] Set up Docker/conda environments
+- [ ] Implement logging and error handling
+- [ ] Create common utility functions
+
+### Phase 2: Essential Modules (Day 2-4)
+- [ ] Module 1: QC pipeline
+- [ ] Module 2: Assembly pipeline (all paths)
+- [ ] Module 3: Identification pipeline
+- [ ] Module 4: Annotation pipeline
+
+### Phase 3: Specialized Analysis (Day 4-6)
+- [ ] Module 5a-h: All specialized analyses
+- [ ] Module 6: Anomaly detection
+- [ ] Module 7: Phylogenetic analysis
+
+### Phase 4: Reporting & Visualization (Day 6-7)
+- [ ] Module 8: Report generation
+- [ ] Interactive visualizations
+- [ ] Circular/linear genome maps
+- [ ] Testing and refinement
+
+### Phase 5: Integration & Testing (Day 7+)
+- [ ] Full pipeline integration
+- [ ] Test with all test cases
+- [ ] Documentation
+- [ ] Optimization
+
+---
+
+## 9. Open Questions
+
+Before we start building, please clarify:
+
+1. **Sample metadata input**: What metadata will be provided with samples?
+   - Sample ID
+   - Collection date
+   - Source (clinical, environmental, etc.)
+   - Expected organism (if known)
+   - Sequencing platform details
+   - Any other fields?
+
+2. **Reference genome handling**: 
+   - Will you often have a specific reference to compare against?
+   - Should we include reference-guided analysis modes?
+
+3. **Multi-sample analysis**:
+   - Should the pipeline handle batch processing of many samples?
+   - Comparative analysis across samples (e.g., outbreak investigation)?
+
+4. **Specific organism focus**:
+   - Are there specific pathogens you work with most often?
+   - Should we include organism-specific analysis modules (e.g., Kleborate for Klebsiella)?
+
+5. **Integration needs**:
+   - LIMS integration requirements?
+   - Need to export to specific formats (e.g., NCBI submission)?
+
+6. **Alerting/flagging**:
+   - What findings should trigger alerts?
+   - Priority levels for different findings?
+
+7. **Performance expectations**:
+   - Expected turnaround time?
+   - Acceptable resource usage?
+
+---
+
+## Appendix A: API vs Local Analysis Decision
+
+### Recommendation: Local Analysis (with databases)
+
+**Reasons**:
+1. **Air-gapped requirement**: APIs won't work offline
+2. **Data sensitivity**: Clinical/biosurveillance data shouldn't leave your network
+3. **Reproducibility**: Local databases ensure consistent results
+4. **Speed**: No network latency, can parallelize freely
+5. **No rate limits**: Run as many analyses as needed
+
+**API usage scenarios** (for online testing only):
+- NCBI BLAST (for one-off comparisons)
+- NCBI taxonomy updates
+- Downloading new reference genomes
+
+### Database Size Summary
+
+| Priority | Databases | Total Size |
+|----------|-----------|------------|
+| Essential (P1) | Kraken2, Bakta, GTDB-Tk, CheckV, geNomad, CARD, AMRFinder, VFDB, PubMLST, Pharokka | ~200 GB |
+| Recommended (P2) | InterProScan, eggNOG, Centrifuge, PHROGs, ICEberg | ~150 GB |
+| **Total** | All databases | **~350 GB** |
+
+---
+
+## Appendix B: Quick Start Commands
+
+Once databases are downloaded, here's how we'll structure the pipeline execution:
+
+```bash
+# Basic usage - auto mode
+snakemake --configfile config/config.yaml \
+  --config sample_id=my_sample \
+           reads_short_r1=reads_R1.fastq.gz \
+           reads_short_r2=reads_R2.fastq.gz \
+           mode=auto \
+  --cores 32 --use-conda
+
+# Long-read only
+snakemake --configfile config/config.yaml \
+  --config sample_id=my_sample \
+           reads_long=reads_nanopore.fastq.gz \
+           mode=auto \
+  --cores 32 --use-conda
+
+# Hybrid mode
+snakemake --configfile config/config.yaml \
+  --config sample_id=my_sample \
+           reads_short_r1=reads_R1.fastq.gz \
+           reads_short_r2=reads_R2.fastq.gz \
+           reads_long=reads_nanopore.fastq.gz \
+           mode=auto \
+  --cores 32 --use-conda
+
+# Single module (standalone)
+snakemake --configfile config/config.yaml \
+  --config sample_id=my_sample \
+           assembly=contigs.fasta \
+  -R run_amr_analysis \
+  --cores 16 --use-conda
+```
+
+---
+
+*Document Version: 1.0*
+*Created: December 2024*
+*Last Updated: December 2024*
