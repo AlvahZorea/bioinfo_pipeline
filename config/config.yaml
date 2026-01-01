@@ -1,0 +1,195 @@
+# ============================================================================
+# Genome Analysis Pipeline - Main Configuration
+# ============================================================================
+# Edit paths and parameters as needed for your environment
+
+# ----------------------------------------------------------------------------
+# Sample Information
+# ----------------------------------------------------------------------------
+sample_id: "test_sample"
+sample_name: "Test Sample"
+
+# Input files - set paths to your FASTQ files
+reads:
+  short:
+    r1: null  # Path to forward reads (FASTQ, gzipped OK)
+    r2: null  # Path to reverse reads (FASTQ, gzipped OK)
+  long: null  # Path to long reads (Nanopore FASTQ, gzipped OK)
+
+# Execution mode: "auto", "short", "long", "hybrid"
+# "auto" detects based on available reads
+mode: "auto"
+
+# Sample type: "pure" (single isolate) or "mixed" (metagenomic)
+sample_type: "pure"
+
+# Output directory
+output_dir: "output"
+
+# ----------------------------------------------------------------------------
+# Resource Allocation
+# ----------------------------------------------------------------------------
+threads: 8
+memory_gb: 16
+
+# ----------------------------------------------------------------------------
+# Module Execution Flags
+# ----------------------------------------------------------------------------
+modules:
+  qc: true
+  assembly: true
+  identification: true
+  annotation: true
+  amr: true
+  virulence: true
+  mobile_elements: true
+  prophages: true
+  anomaly: true   # Detect foreign genes, structural variants
+  report: true
+
+# ----------------------------------------------------------------------------
+# Module 1: Quality Control Parameters
+# ----------------------------------------------------------------------------
+qc:
+  # Quality filtering thresholds
+  min_quality: 20           # Minimum base quality score
+  min_length: 50            # Minimum read length after trimming
+  
+  # Adapter trimming
+  adapter_trimming: true
+  
+  # Contamination handling
+  contamination_screening: true
+  remove_contaminants: true  # Remove contaminated reads (true) or just report (false)
+  
+  # Optional: specific Kraken2 database for known contaminants
+  # Set to path of specific DB, or null to use standard
+  contaminant_db: null
+  
+  # Nanopore-specific
+  nanopore:
+    min_length: 500         # Longer minimum for long reads
+    min_quality: 7          # Nanopore quality scale
+
+# ----------------------------------------------------------------------------
+# Module 2: Assembly Parameters
+# ----------------------------------------------------------------------------
+assembly:
+  # Assembler selection: "auto", "spades", "flye", "unicycler"
+  # "auto" selects based on read types
+  assembler: "auto"
+  
+  # SPAdes parameters
+  spades:
+    mode: "careful"         # "careful" or "default"
+    kmer_sizes: [21, 33, 55, 77]
+  
+  # Flye parameters
+  flye:
+    read_type: "nano-raw"   # "nano-raw", "nano-corr", "nano-hq"
+    genome_size: "5m"       # Estimated genome size (can be "auto")
+  
+  # Contig filtering
+  min_contig_length: 500    # Remove contigs shorter than this
+  
+  # Polishing
+  polish: true              # Enable polishing (default: on)
+  polish_rounds: 1          # Number of polishing rounds
+
+# ----------------------------------------------------------------------------
+# Module 3: Identification Parameters
+# ----------------------------------------------------------------------------
+identification:
+  # Kraken2 classification
+  kraken2:
+    confidence: 0.1         # Confidence threshold
+  
+  # fastANI
+  fastani:
+    min_fraction: 0.2       # Minimum alignment fraction
+  
+  # geNomad (virus/plasmid detection)
+  genomad:
+    min_score: 0.7          # Minimum classification score
+
+# ----------------------------------------------------------------------------
+# Module 4: Annotation Parameters
+# ----------------------------------------------------------------------------
+annotation:
+  # Primary annotator: "bakta" or "prokka"
+  bacterial_annotator: "bakta"
+  
+  # Viral annotator
+  viral_annotator: "pharokka"
+  
+  # Bakta parameters
+  bakta:
+    min_contig_length: 1    # Minimum contig length to annotate
+    complete: false         # Complete genome (circular) flag
+    
+  # Gene prediction
+  min_gene_length: 90       # Minimum gene length (bp)
+
+# ----------------------------------------------------------------------------
+# Module 5a: AMR Parameters
+# ----------------------------------------------------------------------------
+amr:
+  # AMRFinderPlus parameters
+  amrfinderplus:
+    ident_min: 0.9          # Minimum identity
+    coverage_min: 0.5       # Minimum coverage
+    organism: null          # Specific organism (or null for auto)
+
+# ----------------------------------------------------------------------------
+# Module 5b: Virulence Parameters
+# ----------------------------------------------------------------------------
+virulence:
+  # VFDB BLAST parameters
+  vfdb:
+    identity: 80            # Minimum % identity
+    coverage: 60            # Minimum % coverage
+    evalue: 1e-10           # E-value threshold
+
+# ----------------------------------------------------------------------------
+# Module 5d: Mobile Elements Parameters
+# ----------------------------------------------------------------------------
+mobile_elements:
+  # MOB-suite parameters
+  mob_suite:
+    min_length: 1000        # Minimum contig length for analysis
+
+# ----------------------------------------------------------------------------
+# Module 5e: Prophage Parameters
+# ----------------------------------------------------------------------------
+prophages:
+  # PhiSpy parameters
+  phispy:
+    min_contig_length: 5000  # Minimum contig length for prophage detection
+
+# ----------------------------------------------------------------------------
+# Module 6: Anomaly Detection Parameters
+# ----------------------------------------------------------------------------
+anomaly:
+  # Reference selection (Mash)
+  mash:
+    distance_threshold: 0.1   # Maximum Mash distance to accept reference
+  
+  # Per-gene BLAST taxonomy
+  gene_blast:
+    evalue: 1e-10             # E-value threshold
+    identity_min: 70          # Minimum identity to assign taxonomy
+    max_targets: 3            # Number of BLAST hits per gene
+  
+  # Anomaly thresholds
+  foreign_gene_identity: 70   # Min identity to call a gene "foreign"
+
+# ----------------------------------------------------------------------------
+# Module 8: Report Parameters
+# ----------------------------------------------------------------------------
+report:
+  # Report format
+  self_contained: true      # Embed all assets in HTML
+  include_plots: true       # Include Plotly visualizations
+  
+  # Optional: custom report title
+  title: null               # Uses sample_name if null

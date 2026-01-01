@@ -1,0 +1,16 @@
+# Conda environment for Identification module
+name: genome_pipeline_identification
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.10
+  - kraken2=2.1.3
+  - fastani=1.34
+  - mash=2.3
+  - genomad=1.7.0
+  - checkv=1.0.1
+  - biopython
+  - pandas
+

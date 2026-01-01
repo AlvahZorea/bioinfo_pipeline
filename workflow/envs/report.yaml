@@ -1,0 +1,21 @@
+# Conda environment for Report Generation
+name: genome_pipeline_report
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.10
+  - jinja2=3.1.3
+  - plotly=5.18.0
+  - pandas=2.2.0
+  - biopython=1.83
+  - pyyaml=6.0.1
+  - numpy
+  # Visualization
+  - pycirclize
+  - dna_features_viewer
+  - pip
+  - pip:
+    - pygenomeviz
+

@@ -1,0 +1,19 @@
+# Conda environment for Assembly module
+name: genome_pipeline_assembly
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.10
+  - spades=3.15.5
+  - flye=2.9.3
+  - unicycler=0.5.0
+  - medaka=1.11.3
+  - pilon=1.24
+  - quast=5.2.0
+  - samtools=1.19
+  - minimap2=2.26
+  - bwa=0.7.17
+  - seqkit
+

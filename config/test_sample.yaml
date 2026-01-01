@@ -1,0 +1,65 @@
+# ============================================================================
+# Test Sample Configuration
+# ============================================================================
+# Run with: snakemake --configfile config/test_sample.yaml --cores 8 --use-conda
+
+# Sample information
+sample_id: "SRR26305306"
+sample_name: "Test Sample SRR26305306"
+
+# Input files - using the existing test data
+reads:
+  short:
+    r1: "SRR26305306_1.fastq.gz"
+    r2: "SRR26305306_2.fastq.gz"
+  long: null  # No long reads for this test
+
+# Execution mode
+mode: "short"  # Short reads only
+
+# Sample type
+sample_type: "pure"
+
+# Output directory
+output_dir: "output"
+
+# Resources
+threads: 8
+memory_gb: 16
+
+# Module execution - enable all for testing
+modules:
+  qc: true
+  assembly: true
+  identification: true
+  annotation: true
+  amr: true
+  virulence: true
+  mobile_elements: true
+  prophages: true
+  anomaly: false
+  report: true
+
+# QC parameters
+qc:
+  min_quality: 20
+  min_length: 50
+  adapter_trimming: true
+  contamination_screening: true
+  remove_contaminants: true
+  contaminant_db: null
+
+# Assembly parameters
+assembly:
+  assembler: "spades"
+  min_contig_length: 500
+  polish: true
+  spades:
+    mode: "careful"
+    kmer_sizes: [21, 33, 55, 77]
+
+# Report
+report:
+  self_contained: true
+  include_plots: true
+

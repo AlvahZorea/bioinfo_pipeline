@@ -1,0 +1,68 @@
+# ============================================================================
+# Database Paths Configuration
+# ============================================================================
+# Update these paths to match your database installation locations
+# Run preparation_scripts/download_databases.sh to download databases
+
+databases:
+  # --------------------------------------------------------------------------
+  # Taxonomic Classification
+  # --------------------------------------------------------------------------
+  kraken2:
+    standard: "/databases/kraken2/standard"
+    # Optional: custom database for specific contaminants
+    contaminant: null
+  
+  # --------------------------------------------------------------------------
+  # Annotation Databases
+  # --------------------------------------------------------------------------
+  bakta: "/databases/bakta/db"
+  pharokka: "/databases/pharokka"
+  
+  # --------------------------------------------------------------------------
+  # Viral Identification
+  # --------------------------------------------------------------------------
+  checkv: "/databases/checkv/checkv-db-v1.5"
+  genomad: "/databases/genomad/genomad_db"
+  
+  # --------------------------------------------------------------------------
+  # AMR Databases
+  # --------------------------------------------------------------------------
+  amrfinder: "/databases/amrfinder/latest"
+  
+  # --------------------------------------------------------------------------
+  # Virulence Databases
+  # --------------------------------------------------------------------------
+  vfdb:
+    nucleotide: "/databases/vfdb/vfdb_core_nucl"
+    protein: "/databases/vfdb/vfdb_core_prot"
+    fasta: "/databases/vfdb/VFDB_setA_pro.fas"
+  
+  # --------------------------------------------------------------------------
+  # Reference Genomes (for fastANI and anomaly detection)
+  # --------------------------------------------------------------------------
+  # Path to directory containing reference genomes for ANI comparison
+  # Or a file listing paths to reference genomes
+  references: "/databases/references"
+  
+  # Mash sketches of RefSeq genomes (for anomaly detection)
+  refseq_mash: "/databases/refseq/refseq_complete.msh"
+  
+  # --------------------------------------------------------------------------
+  # BLAST Databases (for per-gene taxonomy)
+  # --------------------------------------------------------------------------
+  # nr (non-redundant protein) or refseq_protein
+  nr: "/databases/blast/nr"
+  refseq_protein: "/databases/blast/refseq_protein"
+
+# ============================================================================
+# Database Version Tracking
+# ============================================================================
+versions:
+  kraken2: "standard_2024"
+  bakta: "v5.1"
+  pharokka: "v1.5"
+  checkv: "v1.5"
+  genomad: "v1.7"
+  amrfinder: "2024-01-31.1"
+  vfdb: "2024-01"

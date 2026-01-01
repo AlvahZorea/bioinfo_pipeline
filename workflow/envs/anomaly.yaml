@@ -1,0 +1,15 @@
+# Conda environment for Anomaly Detection module
+name: anomaly
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.9
+  - biopython>=1.80
+  - mash>=2.3
+  - mummer4>=4.0
+  - blast>=2.14
+  - numpy
+  - pandas
+

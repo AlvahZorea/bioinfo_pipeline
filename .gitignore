@@ -1,0 +1,39 @@
+# Snakemake
+.snakemake/
+
+# Output directories (sample-specific)
+output/
+mock_data/
+
+# Large data files
+*.fastq.gz
+*.fastq
+*.fasta
+*.fa
+*.fai
+*.gbff
+*.gff
+*.gff3
+
+# Excel files
+*.xlsx
+
+# Binary/image files
+*.png
+*.jpg
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+

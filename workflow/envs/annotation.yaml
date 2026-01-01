@@ -1,0 +1,15 @@
+# Conda environment for Annotation module
+name: genome_pipeline_annotation
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - python>=3.10
+  - bakta=1.9.2
+  - pharokka=1.5.1
+  - prodigal=2.6.3
+  - aragorn=1.2.41
+  - barrnap=0.9
+  - biopython
+
