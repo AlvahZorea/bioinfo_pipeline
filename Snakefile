@@ -163,7 +163,7 @@ rule create_output_dirs:
         """
         mkdir -p {output}
         mkdir -p {OUTPUT_DIR}/05_specialized/{{amr,virulence,mge,prophages}}
-        mkdir -p {OUTPUT_DIR}/06_anomaly/{{reference,alignment,gene_taxonomy}}
+        mkdir -p {OUTPUT_DIR}/06_anomaly/{{reference,alignment,gene_taxonomy,synteny,intergenic,integrated_elements}}
         """
 
 

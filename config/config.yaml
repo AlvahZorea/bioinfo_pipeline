@@ -182,6 +182,24 @@ anomaly:
   
   # Anomaly thresholds
   foreign_gene_identity: 70   # Min identity to call a gene "foreign"
+  novel_gene_identity: 50     # Below this identity = novel/synthetic gene
+  
+  # Minority species detection (for chimeric genomes)
+  minority_species_threshold: 0.5  # Percentage threshold for flagging
+  
+  # Foreign gene clustering (integrated elements)
+  min_cluster_size: 3         # Minimum adjacent foreign genes to flag as element
+  cluster_distance: 10000     # Maximum distance between genes in cluster (bp)
+  
+  # Intergenic region analysis
+  intergenic_min_length: 100  # Minimum intergenic region size to analyze
+  intergenic_max_length: 10000
+  
+  # Synteny analysis
+  synteny_enabled: true       # Enable gene order comparison
+  
+  # Integrated element detection
+  integrated_element_enabled: true  # Scan for plasmid genes in chromosome
 
 # ----------------------------------------------------------------------------
 # Module 8: Report Parameters

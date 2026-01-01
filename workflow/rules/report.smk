@@ -63,10 +63,25 @@ rule aggregate_results:
             "prophages": input.prophage,
         }
         
-        # Add anomaly if available (check file exists)
+        # Add anomaly data if available
         anomaly_path = f"{OUTPUT_DIR}/06_anomaly/anomaly_summary.json"
         if os.path.exists(anomaly_path):
             json_inputs["anomaly"] = anomaly_path
+        
+        # Add synteny data if available
+        synteny_path = f"{OUTPUT_DIR}/06_anomaly/synteny/synteny_report.json"
+        if os.path.exists(synteny_path):
+            json_inputs["synteny"] = synteny_path
+        
+        # Add intergenic data if available
+        intergenic_path = f"{OUTPUT_DIR}/06_anomaly/intergenic/intergenic_taxonomy.json"
+        if os.path.exists(intergenic_path):
+            json_inputs["intergenic"] = intergenic_path
+        
+        # Add integrated elements data if available
+        integrated_path = f"{OUTPUT_DIR}/06_anomaly/integrated_elements/integrated_elements.json"
+        if os.path.exists(integrated_path):
+            json_inputs["integrated_elements"] = integrated_path
         
         for key, filepath in json_inputs.items():
             if os.path.exists(filepath):
@@ -204,6 +219,13 @@ def generate_html_report(results, title, contigs_file):
     # Check for anomalies
     has_anomaly = anomaly.get("anomaly_detected", False)
     foreign_genes = anomaly.get("gene_taxonomy", {}).get("foreign_genes", [])
+    novel_genes = anomaly.get("gene_taxonomy", {}).get("novel_genes", [])
+    foreign_clusters = anomaly.get("foreign_gene_clusters", [])
+    synteny = results.get("synteny", {})
+    intergenic = results.get("intergenic", {})
+    integrated_elements = results.get("integrated_elements", {})
+    minority_species = results.get("taxonomy", {}).get("kraken2", {}).get("minority_species", [])
+    deleted_genes = anomaly.get("alignment", {}).get("deleted_genes", [])
     
     # Build report HTML
     html = f"""<!DOCTYPE html>
@@ -451,7 +473,13 @@ def generate_html_report(results, title, contigs_file):
         var features = {json.dumps(features[:500])};  // Limit for performance
         var alignmentRegions = {json.dumps(alignment_regions)};
         var foreignGenes = {json.dumps(foreign_genes)};
+        var novelGenes = {json.dumps(novel_genes)};
+        var foreignClusters = {json.dumps(foreign_clusters)};
+        var deletedGenes = {json.dumps(deleted_genes)};
         var taxonomyDist = {json.dumps(anomaly.get('gene_taxonomy', {}).get('taxonomy_distribution', {}))};
+        var syntenyData = {json.dumps(synteny)};
+        var intergenicData = {json.dumps(intergenic)};
+        var integratedElements = {json.dumps(integrated_elements.get('candidates', []) if isinstance(integrated_elements, dict) else [])};
         
         // Circular Genome Map
         function drawCircularGenome() {{
@@ -683,11 +711,23 @@ def generate_anomaly_alert_section(results):
     """Generate prominent anomaly alert at top of report"""
     anomaly = results.get('anomaly', {})
     foreign_genes = anomaly.get('gene_taxonomy', {}).get('foreign_genes', [])
+    novel_genes = anomaly.get('gene_taxonomy', {}).get('novel_genes', [])
+    foreign_clusters = anomaly.get('foreign_gene_clusters', [])
     anomaly_types = anomaly.get('anomaly_types', [])
+    severity = anomaly.get('severity', 'none')
+    deleted_genes = anomaly.get('alignment', {}).get('deleted_genes', [])
+    minority_species = results.get('taxonomy', {}).get('kraken2', {}).get('minority_species', [])
+    
+    severity_colors = {
+        'high': '#c0392b',
+        'medium': '#e67e22',
+        'low': '#f1c40f'
+    }
+    severity_color = severity_colors.get(severity, '#e74c3c')
     
     html = f"""
-    <div class="section anomaly-alert">
-        <h2>⚠️ Genomic Anomalies Detected</h2>
+    <div class="section anomaly-alert" style="border-color: {severity_color};">
+        <h2 style="color: {severity_color};">⚠️ Genomic Anomalies Detected (Severity: {severity.upper()})</h2>
         <div class="alert alert-danger">
             <strong>This genome shows signs of potential modification or unusual characteristics:</strong>
             <ul style="margin-top: 10px; margin-left: 20px;">
@@ -696,11 +736,30 @@ def generate_anomaly_alert_section(results):
     if "foreign_gene_insertion" in anomaly_types:
         html += f"<li><strong>{len(foreign_genes)} foreign gene(s)</strong> detected with different taxonomic origin than host</li>"
     
-    if "structural_insertion" in anomaly_types:
-        html += "<li><strong>Structural insertions</strong> detected relative to reference genome</li>"
+    if "integrated_foreign_element" in anomaly_types:
+        html += f"<li><strong>{len(foreign_clusters)} integrated foreign element(s)</strong> (clusters of 3+ adjacent foreign genes)</li>"
     
-    if "structural_deletion" in anomaly_types:
-        html += "<li><strong>Structural deletions</strong> detected relative to reference genome</li>"
+    if "novel_synthetic_genes" in anomaly_types:
+        html += f"<li><strong>{len(novel_genes)} novel/synthetic gene(s)</strong> with no BLAST hits (potentially engineered)</li>"
+    
+    if "structural_deletion" in anomaly_types or "gene_deletion" in anomaly_types:
+        total_deleted = sum(len(d.get('genes', [])) for d in deleted_genes)
+        html += f"<li><strong>Gene deletions</strong> detected - {total_deleted} gene(s) missing relative to reference</li>"
+    
+    if "gene_rearrangement" in anomaly_types:
+        html += "<li><strong>Gene rearrangements</strong> detected - genes out of expected order</li>"
+    
+    if "gene_inversion" in anomaly_types:
+        html += "<li><strong>Gene inversions</strong> detected - genes on opposite strand vs reference</li>"
+    
+    if "foreign_regulatory_element" in anomaly_types:
+        html += "<li><strong>Foreign regulatory elements</strong> detected in intergenic regions</li>"
+    
+    if "possible_integrated_plasmid" in anomaly_types:
+        html += "<li><strong>Possible integrated plasmid/ICE</strong> detected (plasmid backbone genes in chromosome)</li>"
+    
+    if minority_species:
+        html += f"<li><strong>Mixed taxonomy warning:</strong> {len(minority_species)} minority species detected above threshold</li>"
     
     html += """
             </ul>
@@ -800,16 +859,28 @@ def generate_alignment_section(results):
 
 
 def generate_anomaly_details_section(results):
-    """Generate detailed anomaly detection section"""
+    """Generate detailed anomaly detection section with all anomaly types"""
     anomaly = results.get('anomaly', {})
     gene_tax = anomaly.get('gene_taxonomy', {})
     foreign_genes = gene_tax.get('foreign_genes', [])
+    novel_genes = gene_tax.get('novel_genes', [])
+    foreign_clusters = anomaly.get('foreign_gene_clusters', [])
+    synteny = results.get('synteny', {})
+    intergenic = results.get('intergenic', {})
+    integrated = results.get('integrated_elements', {})
+    deleted_genes = anomaly.get('alignment', {}).get('deleted_genes', [])
+    minority_species = results.get('taxonomy', {}).get('kraken2', {}).get('minority_species', [])
     
     if not anomaly:
         return ""
     
+    has_any_anomaly = (foreign_genes or novel_genes or foreign_clusters or 
+                       synteny.get('rearrangements') or synteny.get('inversions') or
+                       intergenic.get('foreign_elements') or 
+                       integrated.get('candidates') or deleted_genes or minority_species)
+    
     html = f"""
-    <div class="section{' anomaly-alert' if foreign_genes else ''}">
+    <div class="section{' anomaly-alert' if has_any_anomaly else ''}">
         <h2>Anomaly Detection Analysis</h2>
         
         <div class="stats-grid">
@@ -817,23 +888,93 @@ def generate_anomaly_details_section(results):
                 <div class="value">{len(foreign_genes)}</div>
                 <div class="label">Foreign Genes</div>
             </div>
+            <div class="stat-card{' anomaly' if novel_genes else ''}">
+                <div class="value">{len(novel_genes)}</div>
+                <div class="label">Novel/Unknown Genes</div>
+            </div>
+            <div class="stat-card{' anomaly' if foreign_clusters else ''}">
+                <div class="value">{len(foreign_clusters)}</div>
+                <div class="label">Integrated Elements</div>
+            </div>
             <div class="stat-card">
                 <div class="value">{gene_tax.get('host_genus', 'Unknown')}</div>
                 <div class="label">Host Genus</div>
             </div>
-            <div class="stat-card">
-                <div class="value">{gene_tax.get('status', 'N/A')}</div>
-                <div class="label">Analysis Status</div>
-            </div>
         </div>
     """
     
+    # Minority Species Alert
+    if minority_species:
+        html += """
+        <h3>⚠️ Minority Species Alert</h3>
+        <div class="alert alert-warning">
+            <strong>Multiple taxa detected above threshold!</strong> This may indicate contamination, 
+            a chimeric/hybrid genome, or horizontal gene transfer.
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Genus</th>
+                    <th>Percentage</th>
+                    <th>Warning</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        for sp in minority_species:
+            html += f"""
+                <tr style="background: #fff3cd;">
+                    <td><strong>{sp.get('name', 'Unknown')}</strong></td>
+                    <td>{sp.get('percentage', 0):.2f}%</td>
+                    <td><span class="badge badge-warning">Minority Species</span></td>
+                </tr>
+            """
+        html += """
+            </tbody>
+        </table>
+        """
+    
+    # Foreign Gene Clusters (Integrated Elements)
+    if foreign_clusters:
+        html += """
+        <h3>🧬 Integrated Foreign Elements</h3>
+        <div class="alert alert-danger">
+            <strong>Clusters of adjacent foreign genes detected!</strong> These may represent 
+            integrated plasmids, pathogenicity islands, or engineered gene cassettes.
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Element</th>
+                    <th>Contig</th>
+                    <th>Location</th>
+                    <th>Genes</th>
+                    <th>Origin</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        for cluster in foreign_clusters:
+            html += f"""
+                <tr class="foreign-gene">
+                    <td><strong>{cluster.get('type', 'Unknown')}</strong></td>
+                    <td>{cluster.get('contig', 'N/A')}</td>
+                    <td>{cluster.get('start', 0):,} - {cluster.get('end', 0):,}</td>
+                    <td>{cluster.get('num_genes', 0)} genes</td>
+                    <td><span class="badge badge-danger">{cluster.get('dominant_genus', 'Unknown')}</span></td>
+                </tr>
+            """
+        html += """
+            </tbody>
+        </table>
+        """
+    
+    # Foreign Genes
     if foreign_genes:
         html += """
-        <h3>Foreign Genes Detected</h3>
+        <h3>🔬 Foreign Genes Detected</h3>
         <div class="alert alert-danger">
-            The following genes have taxonomic classification different from the host organism, 
-            suggesting potential horizontal gene transfer or genomic engineering.
+            The following genes have taxonomic classification different from the host organism.
         </div>
         <table>
             <thead>
@@ -855,14 +996,201 @@ def generate_anomaly_details_section(results):
                     <td><span class="badge badge-danger">Foreign</span></td>
                 </tr>
             """
+        if len(foreign_genes) > 20:
+            html += f'<tr><td colspan="4"><em>... and {len(foreign_genes) - 20} more</em></td></tr>'
         html += """
             </tbody>
         </table>
         """
-    else:
+    
+    # Novel/Synthetic Genes (no BLAST hits)
+    if novel_genes:
+        html += """
+        <h3>🧪 Novel/Synthetic Genes</h3>
+        <div class="alert alert-danger">
+            <strong>Genes with no database matches detected!</strong> These may be synthetic, 
+            highly divergent, or from unsequenced organisms.
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Gene ID</th>
+                    <th>Best Hit</th>
+                    <th>Identity</th>
+                    <th>Reason</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        for gene in novel_genes[:20]:
+            reason = gene.get('reason', 'unknown')
+            reason_badge = 'badge-danger' if reason == 'no_blast_hit' else 'badge-warning'
+            html += f"""
+                <tr style="background: #ffe6e6;">
+                    <td><strong>{gene.get('gene_id', 'N/A')}</strong></td>
+                    <td>{gene.get('best_hit', 'None') or 'None'}</td>
+                    <td>{gene.get('identity', 0):.1f}%</td>
+                    <td><span class="badge {reason_badge}">{reason.replace('_', ' ').title()}</span></td>
+                </tr>
+            """
+        if len(novel_genes) > 20:
+            html += f'<tr><td colspan="4"><em>... and {len(novel_genes) - 20} more</em></td></tr>'
+        html += """
+            </tbody>
+        </table>
+        """
+    
+    # Deleted Genes
+    if deleted_genes:
+        html += """
+        <h3>❌ Gene Deletions</h3>
+        <div class="alert alert-warning">
+            <strong>Genes present in reference but absent in this genome.</strong>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Deletion Region</th>
+                    <th>Deleted Genes</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        for deletion in deleted_genes[:10]:
+            genes_list = ', '.join(g.get('name', 'unknown') for g in deletion.get('genes', [])[:5])
+            if len(deletion.get('genes', [])) > 5:
+                genes_list += f" ... (+{len(deletion['genes']) - 5} more)"
+            html += f"""
+                <tr>
+                    <td>{deletion.get('deletion_start', 0):,} - {deletion.get('deletion_end', 0):,}</td>
+                    <td>{genes_list}</td>
+                </tr>
+            """
+        html += """
+            </tbody>
+        </table>
+        """
+    
+    # Synteny Analysis
+    rearrangements = synteny.get('rearrangements', [])
+    inversions = synteny.get('inversions', [])
+    if rearrangements or inversions:
+        html += f"""
+        <h3>🔄 Synteny Analysis</h3>
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value">{synteny.get('total_genes_compared', 0)}</div>
+                <div class="label">Genes Compared</div>
+            </div>
+            <div class="stat-card">
+                <div class="value">{synteny.get('genes_in_order', 0)}</div>
+                <div class="label">Genes in Order</div>
+            </div>
+            <div class="stat-card{' anomaly' if rearrangements else ''}">
+                <div class="value">{len(rearrangements)}</div>
+                <div class="label">Rearrangements</div>
+            </div>
+            <div class="stat-card{' anomaly' if inversions else ''}">
+                <div class="value">{len(inversions)}</div>
+                <div class="label">Inversions</div>
+            </div>
+        </div>
+        """
+        
+        if rearrangements:
+            html += """
+            <h4>Gene Rearrangements</h4>
+            <table>
+                <thead><tr><th>Gene</th><th>Type</th></tr></thead>
+                <tbody>
+            """
+            for r in rearrangements[:10]:
+                html += f'<tr><td>{r.get("gene", "N/A")}</td><td><span class="badge badge-warning">Out of Order</span></td></tr>'
+            html += "</tbody></table>"
+        
+        if inversions:
+            html += """
+            <h4>Gene Inversions</h4>
+            <table>
+                <thead><tr><th>Gene</th><th>Assembly Strand</th><th>Reference Strand</th></tr></thead>
+                <tbody>
+            """
+            for inv in inversions[:10]:
+                html += f'<tr><td>{inv.get("gene", "N/A")}</td><td>{inv.get("assembly_strand", "?")}</td><td>{inv.get("ref_strand", "?")}</td></tr>'
+            html += "</tbody></table>"
+    
+    # Intergenic Foreign Elements
+    intergenic_foreign = intergenic.get('foreign_elements', [])
+    if intergenic_foreign:
+        html += """
+        <h3>📍 Foreign Intergenic Elements</h3>
+        <div class="alert alert-warning">
+            <strong>Foreign elements detected in non-coding regions.</strong> 
+            These may be regulatory elements (promoters, terminators) from other organisms.
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Region</th>
+                    <th>Origin</th>
+                    <th>Identity</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        for elem in intergenic_foreign[:10]:
+            html += f"""
+                <tr>
+                    <td>{elem.get('region_id', 'N/A')}</td>
+                    <td>{elem.get('organism', 'Unknown')}</td>
+                    <td>{elem.get('identity', 0):.1f}%</td>
+                </tr>
+            """
+        html += """
+            </tbody>
+        </table>
+        """
+    
+    # Integrated Mobile Elements (plasmid backbone genes in chromosome)
+    integrated_candidates = integrated.get('candidates', []) if isinstance(integrated, dict) else []
+    if integrated_candidates:
+        html += """
+        <h3>🧫 Possible Integrated Plasmids/ICEs</h3>
+        <div class="alert alert-warning">
+            <strong>Plasmid backbone genes detected in chromosomal contigs.</strong> 
+            This suggests integrated mobile elements.
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Element</th>
+                    <th>Location</th>
+                    <th>Backbone Genes</th>
+                    <th>Type</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        for elem in integrated_candidates:
+            products = ', '.join(elem.get('products', [])[:3])
+            html += f"""
+                <tr>
+                    <td><strong>{elem.get('id', 'N/A')}</strong></td>
+                    <td>{elem.get('contig', 'N/A')}: {elem.get('start', 0):,} - {elem.get('end', 0):,}</td>
+                    <td>{elem.get('num_backbone_genes', 0)} ({products}...)</td>
+                    <td><span class="badge badge-anomaly">{elem.get('type', 'Unknown')}</span></td>
+                </tr>
+            """
+        html += """
+            </tbody>
+        </table>
+        """
+    
+    if not has_any_anomaly:
         html += """
         <div class="alert alert-info">
-            No foreign genes detected. All genes appear consistent with the host organism taxonomy.
+            <strong>No significant anomalies detected.</strong> All genes appear consistent with 
+            the host organism taxonomy and expected genome structure.
         </div>
         """
     
@@ -960,17 +1288,31 @@ def generate_assembly_section(results):
 
 
 def generate_taxonomy_section(results):
-    """Generate taxonomy section HTML"""
+    """Generate taxonomy section HTML with minority species alert"""
     taxonomy = results.get('taxonomy', {})
     kraken = taxonomy.get('kraken2', {})
     
     top_hits = kraken.get('top_hits', [])[:5]
+    minority_species = kraken.get('minority_species', [])
+    has_minority_alert = kraken.get('minority_species_alert', False)
     
     html = f"""
     <div class="alert alert-info">
         <strong>Organism Type:</strong> {results.get('organism_type', 'Unknown').title()}
     </div>
+    """
     
+    # Minority species warning
+    if has_minority_alert and minority_species:
+        html += f"""
+        <div class="alert alert-warning">
+            <strong>⚠️ Multiple Taxa Detected!</strong> {len(minority_species)} non-dominant genus(es) 
+            detected above threshold. This may indicate contamination, chimeric assembly, or 
+            extensive horizontal gene transfer.
+        </div>
+        """
+    
+    html += """
     <h3>Top Taxonomic Hits</h3>
     <table>
         <thead>
@@ -978,6 +1320,7 @@ def generate_taxonomy_section(results):
                 <th>Organism</th>
                 <th>Rank</th>
                 <th>Percentage</th>
+                <th>Status</th>
             </tr>
         </thead>
         <tbody>
@@ -990,6 +1333,18 @@ def generate_taxonomy_section(results):
                 <td>{hit.get('name', 'Unknown')}</td>
                 <td><span class="badge badge-info">{rank_name}</span></td>
                 <td>{hit.get('percentage', 0):.1f}%</td>
+                <td><span class="badge badge-success">Dominant</span></td>
+            </tr>
+        """
+    
+    # Add minority species to table
+    for sp in minority_species:
+        html += f"""
+            <tr style="background: #fff3cd;">
+                <td>{sp.get('name', 'Unknown')}</td>
+                <td><span class="badge badge-info">Genus</span></td>
+                <td>{sp.get('percentage', 0):.2f}%</td>
+                <td><span class="badge badge-warning">Minority</span></td>
             </tr>
         """
     

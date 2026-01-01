@@ -47,12 +47,14 @@ rule kraken2_assembly:
 
 
 rule parse_kraken_taxonomy:
-    """Parse Kraken2 results to extract taxonomy"""
+    """Parse Kraken2 results to extract taxonomy with minority species detection"""
     input:
         report = rules.kraken2_assembly.output.report,
         output = rules.kraken2_assembly.output.output,
     output:
         taxonomy = f"{OUTPUT_DIR}/03_identification/kraken2_taxonomy.json",
+    params:
+        minority_threshold = 0.5  # Percentage threshold for flagging minority species
     run:
         import json
         
@@ -67,10 +69,15 @@ rule parse_kraken_taxonomy:
             "family": None,
             "genus": None,
             "species": None,
+            "minority_species_alert": False,
+            "minority_species": []
         }
         
         rank_map = {'D': 'domain', 'P': 'phylum', 'C': 'class', 'O': 'order', 
                     'F': 'family', 'G': 'genus', 'S': 'species'}
+        
+        # Collect all genus-level hits for minority detection
+        all_genera = []
         
         with open(input.report) as f:
             for line in f:
@@ -90,6 +97,14 @@ rule parse_kraken_taxonomy:
                             "percentage": pct
                         })
                     
+                    # Collect all genus-level hits for minority detection
+                    if rank == 'G' and pct >= params.minority_threshold:
+                        all_genera.append({
+                            "name": name,
+                            "taxid": taxid,
+                            "percentage": pct
+                        })
+                    
                     # Store highest percentage for each rank
                     if rank in rank_map and pct > 0:
                         rank_name = rank_map[rank]
@@ -99,6 +114,23 @@ rule parse_kraken_taxonomy:
         
         # Sort top hits by percentage
         taxonomy["top_hits"] = sorted(taxonomy["top_hits"], key=lambda x: x["percentage"], reverse=True)[:10]
+        
+        # Detect minority species (any genus above threshold that isn't the dominant one)
+        if len(all_genera) >= 2:
+            # Sort by percentage
+            all_genera = sorted(all_genera, key=lambda x: x["percentage"], reverse=True)
+            dominant_genus = all_genera[0]["name"]
+            
+            # Flag non-dominant genera above threshold
+            for genus in all_genera[1:]:
+                if genus["percentage"] >= params.minority_threshold:
+                    taxonomy["minority_species_alert"] = True
+                    taxonomy["minority_species"].append({
+                        "name": genus["name"],
+                        "taxid": genus["taxid"],
+                        "percentage": genus["percentage"],
+                        "warning": f"Non-dominant genus at {genus['percentage']:.1f}% - may indicate contamination or chimeric genome"
+                    })
         
         with open(output.taxonomy, 'w') as f:
             json.dump(taxonomy, f, indent=2)
