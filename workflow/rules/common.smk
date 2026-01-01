@@ -232,6 +232,11 @@ def report_output(config, filename):
     return os.path.join(get_sample_output(config), "08_report", filename)
 
 
+def anomaly_output(config, filename):
+    """Get path for anomaly detection output file"""
+    return os.path.join(get_sample_output(config), "06_anomaly", filename)
+
+
 def log_output(config, filename):
     """Get path for log file"""
     return os.path.join(get_sample_output(config), "00_logs", filename)

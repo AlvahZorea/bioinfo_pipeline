@@ -52,6 +52,9 @@ rule fastqc_raw_illumina:
         f"{OUTPUT_DIR}/00_logs/fastqc_raw.log"
     conda:
         "../envs/qc.yaml"
+    params:
+        outdir = f"{OUTPUT_DIR}/01_qc/fastqc_raw",
+        sample_id = SAMPLE_ID,
     shell:
         """
         mkdir -p {params.outdir}
@@ -59,13 +62,16 @@ rule fastqc_raw_illumina:
         
         # Rename outputs to standard names
         cd {params.outdir}
+        SAMPLE_ID="{params.sample_id}"
         for f in *_fastqc.html *_fastqc.zip; do
             if [[ "$f" == *"_1"* ]] || [[ "$f" == *"_R1"* ]]; then
-                newname=$(echo "$f" | sed 's/.*/{SAMPLE_ID}_R1_fastqc/')
-                [ "$f" != "$newname"* ] && mv "$f" "${{newname}}.$(echo $f | rev | cut -d. -f1 | rev)" 2>/dev/null || true
+                ext="${{f##*.}}"
+                newname="${{SAMPLE_ID}}_R1_fastqc.${{ext}}"
+                [ "$f" != "$newname" ] && mv "$f" "$newname" 2>/dev/null || true
             elif [[ "$f" == *"_2"* ]] || [[ "$f" == *"_R2"* ]]; then
-                newname=$(echo "$f" | sed 's/.*/{SAMPLE_ID}_R2_fastqc/')
-                [ "$f" != "$newname"* ] && mv "$f" "${{newname}}.$(echo $f | rev | cut -d. -f1 | rev)" 2>/dev/null || true
+                ext="${{f##*.}}"
+                newname="${{SAMPLE_ID}}_R2_fastqc.${{ext}}"
+                [ "$f" != "$newname" ] && mv "$f" "$newname" 2>/dev/null || true
             fi
         done
         """

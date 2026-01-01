@@ -10,7 +10,8 @@ Modules:
     3. Identification
     4. Annotation
     5. Specialized Analysis (AMR, Virulence, MGE, Prophages)
-    6. Anomaly Detection (placeholder)
+    6. Anomaly Detection
+    7. (Reserved for future use)
     8. Report Generation
 
 Usage:

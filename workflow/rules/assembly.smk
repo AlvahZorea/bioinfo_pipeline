@@ -284,7 +284,7 @@ rule filter_contigs:
         "../envs/assembly.yaml"
     shell:
         """
-        seqkit seq -m {params.min_length} {input} > {output} 2>&1 | tee {log}
+        seqkit seq -m {params.min_length} {input} > {output} 2> {log}
         """
 
 

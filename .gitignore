@@ -1,39 +1,91 @@
-# Snakemake
-.snakemake/
+# =============================================================================
+# Genome Analysis Pipeline - .gitignore
+# =============================================================================
 
-# Output directories (sample-specific)
+# Output directories
 output/
 mock_data/
 
-# Large data files
-*.fastq.gz
+# Test/example data files (should not be in version control)
+data/examples/
+
+# Loose data files at root (move to data/examples/)
 *.fastq
+*.fastq.gz
 *.fasta
 *.fa
+*.fna
 *.fai
-*.gbff
 *.gff
-*.gff3
-
-# Excel files
+*.gbff
+*.gbk
 *.xlsx
-
-# Binary/image files
+*.csv
+*.report
 *.png
 *.jpg
+*.jpeg
+
+# But allow config files
+!config/*.yaml
 
 # Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
 .eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
 
 # IDE
-.vscode/
 .idea/
+.vscode/
+*.swp
+*.swo
+*~
 
-# OS
+# Snakemake
+.snakemake/
+
+# Conda
+*.conda
+*.condarc
+
+# Logs
+*.log
+
+# OS files
 .DS_Store
 Thumbs.db
 
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Database files (too large for git)
+databases/
+
+# Docker
+docker_images/
